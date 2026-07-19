@@ -1,32 +1,49 @@
-import bcrypt
+import numpy as np
 from sqlalchemy import select
-from app.models.user import User
-from fastapi import HTTPException
-from app.utils.security import create_access_token
-
 from sqlalchemy.orm import Session
+from fastapi import HTTPException
+
+from app.models.user import User
+from app.utils.security import create_access_token
 from .schema import SignUpRequest, SignInRequest, UserResponse
 
+from face_detector_class import FaceDetector
+from live_detection_single_class import LiveDetection
+from image_embedding import ImageEmbedding
+from exceptions import LivenessError
 
-def sign_up(payload: SignUpRequest, db: Session) -> UserResponse:
+
+def sign_up(payload: SignUpRequest, image: np.ndarray, db: Session) -> UserResponse:
 
     existing = db.scalars(select(User).where(User.name == payload.name)).first()
-
     if existing:
-        raise HTTPException(status_code=500, detail="Try anthor Time!")
-    
-    ImageEmbedding.embed_image
-    new_user = User( 
-        name=payload.username,
-        email=payload.email,
-        password=hash_password(payload.password),
+        # 409 Conflict is the correct status for "resource already exists",
+        # not 500 (500 implies a server bug, this is an expected business case)
+        raise HTTPException(status_code=409, detail="Name already taken, try another.")
+
+    # No try/except here: FaceExtractionError, LivenessError, EmbeddingError
+    # all propagate up and get converted to proper responses by the
+    # handlers registered in error_handlers.py -- this function only
+    # needs to express the happy path.
+
+    face_crop = FaceDetector.crop_single_face(image)
+
+    result = LiveDetection.predict(face_crop)
+    if result["label"] == "spoof":
+        raise LivenessError("Spoof image detected -- sign-up rejected.")
+
+    embedding = ImageEmbedding.embed(face_crop)
+
+    new_user = User(
+        name=payload.name,
+        age=payload.age,
+        embedding=embedding,
     )
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
 
-    return UserResponse(status=201, Message="Created Succesfully")
-
+    return UserResponse(status=201, message="Created successfully")
 # service.py
 
 

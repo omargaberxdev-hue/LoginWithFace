@@ -142,7 +142,10 @@ class LiveDetection:
             raise RuntimeError("Call LiveDetection.load_model() before predict().")
 
         # sklearn expects a 2D batch (n_samples, n_features)
-        feats = LiveDetection.extract_features(image_bgr).reshape(1, -1)
+        try : 
+            feats = LiveDetection.extract_features(image_bgr).reshape(1, -1)
+        except:
+            raise livenessError("Error Occured while processing Liveness")
 
         label = LiveDetection.model.predict(feats)[0]
         proba = LiveDetection.model.predict_proba(feats)[0][1]  # P(real)
