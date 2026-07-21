@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: always
+    env_file: .env
+    environment:
+      POSTGRES_DB: Biopormitc
+      POSTGRES_USER: Admin
+      POSTGRES_PASSWORD: Admin
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U Admin -d Biopormitc"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - MyNetwork
+
+  fastapi:
+    build:
+      context: .
+      dockerfile: dockerfile
+    restart: always
+    env_file: .env
+    command: >
+        sh -c "uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - MyNetwork
+
+volumes:
+  postgres_data:
+
+networks:
+  MyNetwork:
+    driver: bridge

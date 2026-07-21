@@ -1,16 +1,3 @@
-"""
-Register these once, in your main FastAPI app setup (e.g. main.py):
-
-    from app.exceptions import FaceExtractionError, LivenessError, EmbeddingError
-    from app.error_handlers import register_error_handlers
-
-    app = FastAPI()
-    register_error_handlers(app)
-
-After this, any route that lets one of these exceptions propagate
-(no try/except needed in the route itself) automatically gets converted
-into the correct HTTP response.
-"""
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse

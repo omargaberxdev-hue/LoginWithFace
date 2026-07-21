@@ -1,0 +1,42 @@
+# ===== Web Framework =====
+fastapi
+uvicorn[standard]
+
+    
+# ===== Database =====
+sqlalchemy
+pymysql
+alembic
+
+
+# ===== Auth & Config =====
+pydantic
+pydantic-settings
+python-dotenv
+python-jose[cryptography]
+passlib[bcrypt]             # passlib alone has no working hashing backend without this extra
+
+# ===== ML / CV Pipeline =====
+numpy<2                     # hard ceiling: torch/paddleocr/opencv builds still break on numpy 2.x as of this stack
+
+
+# ===== External Services =====
+cloudinary
+requests
+
+# ===== Image =====
+Pillow
+python-multipart
+opencv-python-headless
+
+# ==== observe ====
+structlog
+opentelemetry
+prometheus_client
+
+
+# ===models ====
+mediapipe
+open_clip
+torch
+skimage

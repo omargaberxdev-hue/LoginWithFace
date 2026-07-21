@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from fastapi.openapi.utils import get_openapi
 
+from config.observeablity import setup_observability
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
