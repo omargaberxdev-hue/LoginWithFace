@@ -8,21 +8,21 @@ from skimage.feature import local_binary_pattern
 from observability import trace_stage, log, LIVENESS_RESULT, LIVENESS_CONFIDENCE
 from exceptions import LivenessError
 
+import pathlib
+
 class LiveDetection:
     model = None
 
-    # ---- shared config --------------------------------------------------
     GRID_SIZE = (6, 6)   # wider grid -- face fills most of the frame
     LBP_P = 8
     LBP_R = 1
     N_BANDS = 4
 
-    # ---- model lifecycle --------------------------------------------------
 
     @staticmethod
-    def load_model(model_path: str = "models/liveness_rf.joblib"):
+    def load_model():
+        model_path = pathlib.Path(__file__).parent / "models" / "liveness_rf.joblib"
         LiveDetection.model = joblib.load(model_path)
-
     # ---- shared helpers -----------------------------------------------------
 
     @staticmethod

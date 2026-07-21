@@ -15,6 +15,7 @@ pydantic-settings
 python-dotenv
 python-jose[cryptography]
 passlib[bcrypt]             # passlib alone has no working hashing backend without this extra
+pathlib
 
 # ===== ML / CV Pipeline =====
 numpy<2                     # hard ceiling: torch/paddleocr/opencv builds still break on numpy 2.x as of this stack
