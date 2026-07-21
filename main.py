@@ -11,7 +11,7 @@ async def lifespan(app: FastAPI):
     ImageEmbedding.load_model(device="cuda" if torch.cuda.is_available() else "cpu")
     init_engine()
     _model = joblib.load("models/liveness_rf.joblib")
-
+    setup_observability()   
     yield
 
 

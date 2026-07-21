@@ -19,6 +19,7 @@ class ImageEmbedding:
 
 
     @staticmethod
+    @trace_stage("image_embed")
     def embed_image(image: Image.Image) -> np.ndarray:
         if ImageEmbedding.model is None:
             raise RuntimeError("Call load_model() before embed_image().")

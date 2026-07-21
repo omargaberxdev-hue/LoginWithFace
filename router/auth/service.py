@@ -12,19 +12,14 @@ from live_detection_single_class import LiveDetection
 from image_embedding import ImageEmbedding
 from exceptions import LivenessError
 
+from observability import trace_pipeline, log
+from exceptions import LivenessError, IdentityNotFoundError
 
+@trace_pipeline("signup")
 def sign_up(payload: SignUpRequest, image: np.ndarray, db: Session) -> UserResponse:
-
     existing = db.scalars(select(User).where(User.name == payload.name)).first()
     if existing:
-        # 409 Conflict is the correct status for "resource already exists",
-        # not 500 (500 implies a server bug, this is an expected business case)
         raise HTTPException(status_code=409, detail="Name already taken, try another.")
-
-    # No try/except here: FaceExtractionError, LivenessError, EmbeddingError
-    # all propagate up and get converted to proper responses by the
-    # handlers registered in error_handlers.py -- this function only
-    # needs to express the happy path.
 
     face_crop = FaceDetector.crop_single_face(image)
 
@@ -32,25 +27,66 @@ def sign_up(payload: SignUpRequest, image: np.ndarray, db: Session) -> UserRespo
     if result["label"] == "spoof":
         raise LivenessError("Spoof image detected -- sign-up rejected.")
 
-    embedding = ImageEmbedding.embed(face_crop)
+    embedding = ImageEmbedding.embed_image(face_crop)
+    try:
+        new_user = User(name=payload.name, age=payload.age, embedding=embedding)
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Name already taken, try another.") from exc
 
-    new_user = User(
-        name=payload.name,
-        age=payload.age,
-        embedding=embedding,
-    )
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-
-    return UserResponse(status=201, message="Created successfully")
-# service.py
+    log.info("user_registered", user_id=new_user.id)  # id only -- no name/age/embedding, that's PII
+    return new_user
 
 
-def sign_in(payload: SignInRequest, db: Session) -> UserResponse:
-    existing = db.scalars(select(User).where(User.email == payload.email)).first()
+@trace_pipeline("signin")
+def sign_in(image: np.ndarray, db: Session) -> str:
+    face_crop = FaceDetector.crop_single_face(image)
 
-    if not existing or not verify_password(payload.password, existing.password):
-        raise HTTPException(status_code=401, detail="invalid credentials")
+    result = LiveDetection.predict(face_crop)
+    if result["label"] == "spoof":
+        raise LivenessError("Spoof image detected -- sign-in rejected.")
 
-    return create_access_token({"sub": str(existing.id), "email": existing.email})
+    query_embedding = ImageEmbedding.embed_image(face_crop)
+
+    closest_user, distance = db.execute(
+        select(User, User.embedding.cosine_distance(query_embedding))
+        .order_by(User.embedding.cosine_distance(query_embedding))
+        .limit(1)
+    ).first()
+
+    if closest_user is None or distance > MATCH_THRESHOLD:
+        raise IdentityNotFoundError("No matching registered user found.")
+
+    log.info("user_matched", user_id=closest_user.id, distance=float(distance))
+    return create_access_token({"sub": str(closest_user.id)})
+ 
+
+MATCH_THRESHOLD = 0.30
+ 
+ 
+def sign_in(image: np.ndarray, db: Session) -> UserResponse:
+ 
+    face_crop = FaceDetector.crop_single_face(image)
+ 
+    result = LiveDetection.predict(face_crop)
+    if result["label"] == "spoof":
+        raise LivenessError("Spoof image detected -- sign-in rejected.")
+ 
+    query_embedding = ImageEmbedding.embed(face_crop)
+ 
+    closest_user, distance = db.execute(
+        select(User, User.embedding.cosine_distance(query_embedding))
+        .order_by(User.embedding.cosine_distance(query_embedding))
+        .limit(1)
+    ).first()
+ 
+    if closest_user is None or distance > MATCH_THRESHOLD:
+        raise IdentityNotFoundError("No matching registered user found.")
+ 
+    token = create_access_token({"sub": str(closest_user.id)})
+ 
+    return token
+ 

@@ -4,6 +4,7 @@ from fastapi import APIRouter, File, UploadFile, Form
 
 from pydantic import BaseModel
 
+from service import sign_up, sign_in
 router = ApiRouter(prefix='Auth' ,  dependencies=[Depends(get_db)])
 
 
@@ -19,9 +20,10 @@ async def sign_up(
     image: UploadFile = File(...),
 ):
   meta_data = MetaData(**json_load(MetaData))
-  serice.sign_up(meta_data , image)
+  sign_up(meta_data , image)
   
-
+ 
+  UserResponse(status=201, message="Created successfully")
 
 @router.post("/signin")
 async def signin_endpoint(payload: SignInRequest, response: Response, db: Session = Depends(get_db)):

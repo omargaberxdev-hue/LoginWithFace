@@ -1,19 +1,12 @@
-"""
-LiveDetection: single self-contained class.
 
-Load once:   LiveDetection.load_model()
-Use per request:  LiveDetection.predict(image_bgr) -> {"label": ..., "confidence": ...}
-
-All feature extraction (LBP grid + block-wise FFT) lives as static methods
-on this class -- static because none of them need per-instance state, only
-the shared class-level model/config.
-"""
 
 import joblib
 import numpy as np
 import cv2
 from skimage.feature import local_binary_pattern
 
+from observability import trace_stage, log, LIVENESS_RESULT, LIVENESS_CONFIDENCE
+from exceptions import LivenessError
 
 class LiveDetection:
     model = None
@@ -54,6 +47,7 @@ class LiveDetection:
     # ---- Branch 1: grid-based uniform LBP -----------------------------------
 
     @staticmethod
+    @trace_stage("lbp_extract")
     def extract_lbp_grid_histogram(image_bgr: np.ndarray,
                                     grid_size=None, P=None, R=None) -> np.ndarray:
         grid_size = grid_size or LiveDetection.GRID_SIZE
@@ -107,6 +101,7 @@ class LiveDetection:
         return energies
 
     @staticmethod
+    @trace_stage("fft_extract")
     def extract_fft_grid_features(image_bgr: np.ndarray,
                                    grid_size=None, n_bands=None) -> np.ndarray:
         grid_size = grid_size or LiveDetection.GRID_SIZE
@@ -129,6 +124,7 @@ class LiveDetection:
     # ---- combined feature vector ---------------------------------------------
 
     @staticmethod
+    @trace_stage("feature_concat")
     def extract_features(image_bgr: np.ndarray) -> np.ndarray:
         lbp_feats = LiveDetection.extract_lbp_grid_histogram(image_bgr)
         fft_feats = LiveDetection.extract_fft_grid_features(image_bgr)
@@ -137,6 +133,7 @@ class LiveDetection:
     # ---- public inference call -------------------------------------------------
 
     @staticmethod
+    @trace_stage("liveness_predict")
     def predict(image_bgr: np.ndarray) -> dict:
         if LiveDetection.model is None:
             raise RuntimeError("Call LiveDetection.load_model() before predict().")
@@ -156,8 +153,3 @@ class LiveDetection:
         }
 
 
-if __name__ == "__main__":
-    LiveDetection.load_model()
-    rng = np.random.default_rng(0)
-    fake_img = rng.integers(0, 255, (240, 240, 3), dtype=np.uint8)
-    print(LiveDetection.predict(fake_img))

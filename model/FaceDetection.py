@@ -19,7 +19,8 @@ import mediapipe as mp
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision as mp_vision
 
-
+from observability import trace_stage, log
+from exceptions import FaceExtractionError 
 
 
 class FaceDetector:
@@ -35,7 +36,9 @@ class FaceDetector:
             print("Downloading face detector model (first run only)...")
             urllib.request.urlretrieve(FaceDetector._MODEL_URL, FaceDetector._MODEL_PATH)
 
+    
     @staticmethod
+    @trace_stage("face_detect", expected_exceptions=(FaceExtractionError,))
     def detect_faces(image_bgr: np.ndarray, min_confidence: float = 0.5):
         """Returns a list of (x1, y1, x2, y2) boxes in pixel coordinates."""
         FaceDetector._ensure_model_downloaded()
@@ -60,6 +63,7 @@ class FaceDetector:
         return boxes
 
     @staticmethod
+    @trace_stage("face_crop", expected_exceptions=(FaceExtractionError,))
     def crop_single_face(image_bgr: np.ndarray, margin: float = 0.2,
                           min_confidence: float = 0.5) -> np.ndarray:
         """
@@ -85,13 +89,9 @@ class FaceDetector:
         return FaceDetector.apply_hann_window(image_bgr[y1:y2, x1:x2])
 
     @staticmethod
+    @trace_stage("hann_window")
     def apply_hann_window(image_gray: np.ndarray) -> np.ndarray:
-        """
-        Multiplies the image by a 2D Hann window (outer product of two 1D
-        Hann windows) so pixel values smoothly fade toward zero at all
-        four edges before FFT -- removes the fake high-frequency energy
-        caused by the crop boundary's artificial discontinuity.
-        """
+      
         h, w = image_gray.shape
         hann_row = np.hanning(h)
         hann_col = np.hanning(w)
@@ -99,15 +99,3 @@ class FaceDetector:
         return image_gray.astype(np.float32) * window_2d
 
 
-if __name__ == "__main__":
-    # Hann window sanity check (no network/model needed)
-    rng = np.random.default_rng(0)
-    gray_block = rng.integers(0, 255, (64, 64), dtype=np.uint8)
-    windowed = FaceDetector.apply_hann_window(gray_block)
-    print("Windowed block dtype/shape:", windowed.dtype, windowed.shape)
-    print("Corner value (should be near 0):", windowed[0, 0])
-    print("Center value (should be near original):", windowed[32, 32], "vs raw:", gray_block[32, 32])
-
-    # face detection requires the .tflite model (auto-downloads on first
-    # run -- needs real internet access and a real face image to test)
-    # crop = FaceDetector.crop_single_face(cv2.imread("your_test_image.jpg"))
