@@ -1,34 +1,40 @@
-import torch
+import logging
 import numpy as np
-import open_clip
+import torch
+import torch.nn.functional as F
 from PIL import Image
+from torchvision import transforms
+from transformers import AutoModel
+
+logger = logging.getLogger(__name__)
 
 
-class ImageEmbedding:
-    model = None
-    preprocess = None
+class EmbeddingError(RuntimeError):
+    pass
 
-    @staticmethod
-    def load_model(device: str = "cpu"):
-        ImageEmbedding.device = device
-        ImageEmbedding.model, _, ImageEmbedding.preprocess = open_clip.create_model_and_transforms(
-            'ViT-B-32', pretrained='openai'
+
+class ImageEmbedder:
+    def __init__(self, model_id: str, device: str = "cpu", input_size: int = 112):
+        self.device = torch.device(device)
+        self.model = (
+            AutoModel.from_pretrained(model_id, trust_remote_code=True)
+            .to(self.device)
+            .eval()
         )
-        ImageEmbedding.model.to(device)
-        ImageEmbedding.model.eval()
+        self.preprocess = transforms.Compose([
+            transforms.Resize((input_size, input_size)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.5] * 3, [0.5] * 3),
+        ])
 
+    def _to_tensor(self, image: Image.Image) -> torch.Tensor:
+        return self.preprocess(image.convert("RGB")).unsqueeze(0).to(self.device)
 
-    @staticmethod
-    @trace_stage("image_embed")
-    def embed_image(image: Image.Image) -> np.ndarray:
-        if ImageEmbedding.model is None:
-            raise RuntimeError("Call load_model() before embed_image().")
-        try :
-            image_tensor = ImageEmbedding.preprocess(image).unsqueeze(0)
-
-            with torch.no_grad():
-                embedding = ImageEmbedding.model.encode_image(image_tensor)
-        except :
-            raise EmbeddedError("Error happing while Embeded the Image")
-
-        return embedding.squeeze(0).numpy()
+    def embed(self, image: Image.Image) -> np.ndarray:
+        x = self._to_tensor(image)
+        try:
+            with torch.inference_mode():
+                emb = self.model(x)
+        except Exception as e:
+            raise EmbeddingError("Model inference failed") from e
+        return F.normalize(emb, p=2, dim=1).squeeze(0).cpu().numpy()

@@ -1,18 +1,15 @@
-# security.py
 from datetime import datetime, timedelta, timezone
+
 from jose import jwt
 
-SECRET_KEY = "your-secret-key-here" 
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
+from config.settings import settings
 
-def create_access_token(data: dict) -> str:
-    print("encode secret:", SECRET_KEY)
-    to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+def create_access_token(sub: str) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(seconds=settings.session_expire_seconds)
+    return jwt.encode({"sub": sub, "exp": expire}, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
 
 def decode_access_token(token: str) -> dict:
-    print("encode secret:", SECRET_KEY)
-    return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    # raises jose.JWTError on bad / expired token
+    return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])

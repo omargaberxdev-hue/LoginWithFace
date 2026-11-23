@@ -1,24 +1,38 @@
 """
-Custom exceptions for the sign-up/sign-in pipeline. Each carries a
-`stage` so a single global handler can report exactly which step failed
-without needing separate except blocks per stage in the route itself.
+Pipeline exceptions. Each carries its own HTTP status + error code, so ONE
+handler covers all of them (ExceptionHandler/handler.py).
 """
 
 
 class PipelineError(Exception):
-    """Common base so a single except/handler can catch all three if needed."""
-    def __init__(self, message: str = "Internal Error", stage: str = None):
+    status_code = 500
+    error = "pipeline_error"
+
+    def __init__(self, message: str = "Internal error", stage: str | None = None):
         self.stage = stage or self.__class__.__name__
         super().__init__(message)
 
 
 class FaceExtractionError(PipelineError):
-    pass
+    status_code = 400
+    error = "face_extraction_failed"
 
 
 class LivenessError(PipelineError):
-    pass
+    status_code = 400
+    error = "liveness_check_failed"
 
 
 class EmbeddingError(PipelineError):
-    pass
+    status_code = 500
+    error = "embedding_failed"
+
+
+class IdentityNotFoundError(PipelineError):
+    status_code = 401
+    error = "identity_not_found"
+
+
+class UserExistsError(PipelineError):
+    status_code = 409
+    error = "user_exists"

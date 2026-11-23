@@ -1,92 +1,53 @@
 import numpy as np
+import structlog
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from fastapi import HTTPException
 
-from app.models.user import User
-from app.utils.security import create_access_token
-from .schema import SignUpRequest, SignInRequest, UserResponse
+from config.settings import settings
+from config.users import User
+from Expection.exception import IdentityNotFoundError, UserExistsError
+from model.pipeline import FacePipeline
+from utils.security import create_access_token
 
-from face_detector_class import FaceDetector
-from live_detection_single_class import LiveDetection
-from image_embedding import ImageEmbedding
-from exceptions import LivenessError
+from .schema import SignUpMeta
 
-from observability import trace_pipeline, log
-from exceptions import LivenessError, IdentityNotFoundError
+log = structlog.get_logger()
 
-@trace_pipeline("signup")
-def sign_up(payload: SignUpRequest, image: np.ndarray, db: Session) -> UserResponse:
-    existing = db.scalars(select(User).where(User.name == payload.name)).first()
-    if existing:
-        raise HTTPException(status_code=409, detail="Name already taken, try another.")
 
-    face_crop = FaceDetector.crop_single_face(image)
+def sign_up(meta: SignUpMeta, image: np.ndarray, db: Session, pipeline: FacePipeline) -> User:
+    # cheap check first, before running three models
+    if db.scalar(select(User.id).where(User.name == meta.name)):
+        raise UserExistsError("Name already taken, try another.", stage="signup")
 
-    result = LiveDetection.predict(face_crop)
-    if result["label"] == "spoof":
-        raise LivenessError("Spoof image detected -- sign-up rejected.")
+    embedding = pipeline.embed_live_face(image, "sign-up")
 
-    embedding = ImageEmbedding.embed_image(face_crop)
+    user = User(name=meta.name, age=meta.age, embedding=embedding)
+    db.add(user)
     try:
-        new_user = User(name=payload.name, age=payload.age, embedding=embedding)
-        db.add(new_user)
         db.commit()
-        db.refresh(new_user)
-    except Exception as exc:
+    except IntegrityError as exc:  # lost the race against the unique constraint
         db.rollback()
-        raise HTTPException(status_code=409, detail="Name already taken, try another.") from exc
+        raise UserExistsError("Name already taken, try another.", stage="signup") from exc
+    db.refresh(user)
 
-    log.info("user_registered", user_id=new_user.id)  # id only -- no name/age/embedding, that's PII
-    return new_user
+    log.info("user_registered", user_id=user.id)  # id only: name/age/embedding are PII
+    return user
 
 
-@trace_pipeline("signin")
-def sign_in(image: np.ndarray, db: Session) -> str:
-    face_crop = FaceDetector.crop_single_face(image)
+def sign_in(image: np.ndarray, db: Session, pipeline: FacePipeline) -> str:
+    embedding = pipeline.embed_live_face(image, "sign-in")
 
-    result = LiveDetection.predict(face_crop)
-    if result["label"] == "spoof":
-        raise LivenessError("Spoof image detected -- sign-in rejected.")
+    distance_expr = User.embedding.cosine_distance(embedding)
+    row = db.execute(select(User, distance_expr).order_by(distance_expr).limit(1)).first()
 
-    query_embedding = ImageEmbedding.embed_image(face_crop)
+    if row is None:  # empty table (old code crashed unpacking None)
+        raise IdentityNotFoundError("No matching registered user found.", stage="match")
 
-    closest_user, distance = db.execute(
-        select(User, User.embedding.cosine_distance(query_embedding))
-        .order_by(User.embedding.cosine_distance(query_embedding))
-        .limit(1)
-    ).first()
+    user, distance = row
+    if distance > settings.match_threshold:
+        log.warning("signin_no_match", best_distance=float(distance))
+        raise IdentityNotFoundError("No matching registered user found.", stage="match")
 
-    if closest_user is None or distance > MATCH_THRESHOLD:
-        raise IdentityNotFoundError("No matching registered user found.")
-
-    log.info("user_matched", user_id=closest_user.id, distance=float(distance))
-    return create_access_token({"sub": str(closest_user.id)})
- 
-
-MATCH_THRESHOLD = 0.30
- 
- 
-def sign_in(image: np.ndarray, db: Session) -> UserResponse:
- 
-    face_crop = FaceDetector.crop_single_face(image)
- 
-    result = LiveDetection.predict(face_crop)
-    if result["label"] == "spoof":
-        raise LivenessError("Spoof image detected -- sign-in rejected.")
- 
-    query_embedding = ImageEmbedding.embed(face_crop)
- 
-    closest_user, distance = db.execute(
-        select(User, User.embedding.cosine_distance(query_embedding))
-        .order_by(User.embedding.cosine_distance(query_embedding))
-        .limit(1)
-    ).first()
- 
-    if closest_user is None or distance > MATCH_THRESHOLD:
-        raise IdentityNotFoundError("No matching registered user found.")
- 
-    token = create_access_token({"sub": str(closest_user.id)})
- 
-    return token
- 
+    log.info("user_matched", user_id=user.id, distance=float(distance))
+    return create_access_token(str(user.id))
